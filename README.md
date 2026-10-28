@@ -128,6 +128,8 @@ README.md
 
 ## Deploying
 
+[![Deploy to Azure](https://aka.ms/deploytoazurebutton)](https://portal.azure.com/#create/Microsoft.Template/uri/https%3A%2F%2Fraw.githubusercontent.com%2FRichkpa%2Fsentinel-soar-enrichment%2Fmain%2Fplaybooks%2Fpb-enrich-ip-abuseipdb%2Fazuredeploy.json)
+
 1. Create a Log Analytics workspace and enable Microsoft Sentinel on it.
 2. Install the Azure Activity solution from Content hub and connect it.
 3. Import the analytics rules from `analytics-rules/` (Analytics > Import).
