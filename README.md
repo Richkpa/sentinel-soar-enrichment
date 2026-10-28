@@ -137,12 +137,12 @@ README.md
 7. Sentinel > Settings > Playbook permissions: grant access to the playbook's resource group.
 8. Create an automation rule: on incident created, run the playbook.
 
-## Next steps
+## Next up
 
 - [ ] Failure handling: scope plus run-after branch that comments when enrichment fails
 - [ ] Skip private IP ranges before calling the API
 - [ ] Single severity update after the loop based on the highest score
 - [ ] Identity context from Microsoft Graph (group memberships, recent sign-ins)
 - [ ] Approval-gated remediation through a Teams adaptive card
-- [ ] Ticket creation in ServiceNow or Jira
+- [ ] Ticket creation in Jira
 - [ ] Detection for unsanctioned AI tool activity, enriched the same way
