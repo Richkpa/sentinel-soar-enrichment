@@ -106,22 +106,22 @@ Entity mapping: Account > FullName = Caller, IP > Address = CallerIpAddress, Azu
 ### True Branch
 Tor exit node scored 100/100: tagged `malicious-ip`, severity raised to High.
 
-![True branch](docs/images/true-branch.png)
+<img src="docs/images/true-branch.png" alt="True branch" width="500">
 
 ### False Branch
 8.8.8.8 scored 0/100: tagged `ip-enriched-clean`, severity unchanged.
 
-![False branch](docs/images/false-branch.png)
+<img src="docs/images/false-branch.png" alt="False branch" width="500">
 
 ### Failure Path
 Invalid API key: HTTP 401 caught, failure comment posted, tagged `enrichment-failed`.
 
-![Failure path](docs/images/failure-path.png)
+<img src="docs/images/failure-path.png" alt="Failure path" width="500">
 
 ### Run History
 Early failed runs from the Key Vault typo, then consistent successful runs after the fix.
 
-![Run history](docs/images/run-history.png)
+<img src="docs/images/run-history.png" alt="Run history" width="500">
 
 ## Troubleshooting notes from the build
 
@@ -160,9 +160,9 @@ README.md
 7. Sentinel > Settings > Playbook permissions: grant access to the playbook's resource group.
 8. Create an automation rule: on incident created, run the playbook.
 
-## Next up
+## Roadmap
 
-- [*] Failure handling: scope plus run-after branch that comments when enrichment fails
+- [x] Failure handling: scope plus run-after branch that comments when enrichment fails
 - [ ] Skip private IP ranges before calling the API
 - [ ] Single severity update after the loop based on the highest score
 - [ ] Identity context from Microsoft Graph (group memberships, recent sign-ins)
