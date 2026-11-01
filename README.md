@@ -43,6 +43,9 @@ flowchart LR
    - Condition: `abuseConfidenceScore >= 50`
      - True: set severity to High, add tag `malicious-ip`
      - False: add tag `ip-enriched-clean`
+5. If anything in the enrichment Scope fails or times out for an IP:
+   - Comment on the incident with the IP and HTTP status
+   - Add tag `enrichment-failed`
 
 ## Security design
 
@@ -98,9 +101,26 @@ Entity mapping: Account > FullName = Caller, IP > Address = CallerIpAddress, Azu
 | True branch | 185.220.101.1 (Tor exit node) | Score 100/100, tagged `malicious-ip`, severity raised Low to High |
 | False branch | 8.8.8.8 | Score 0/100, tagged `ip-enriched-clean`, severity unchanged |
 | Real detection | Role assignment in the subscription | Medium incident from Rule B, caller IP enriched, tagged `ip-enriched-clean` |
+| Failure path | Invalid API key | HTTP 401 caught, failure comment posted, tagged `enrichment-failed`, severity unchanged |
+
+### True Branch
+Tor exit node scored 100/100: tagged `malicious-ip`, severity raised to High.
 
 ![True branch](docs/images/true-branch.png)
+
+### False Branch
+8.8.8.8 scored 0/100: tagged `ip-enriched-clean`, severity unchanged.
+
 ![False branch](docs/images/false-branch.png)
+
+### Failure Path
+Invalid API key: HTTP 401 caught, failure comment posted, tagged `enrichment-failed`.
+
+![Failure path](docs/images/failure-path.png)
+
+### Run History
+Early failed runs from the Key Vault typo, then consistent successful runs after the fix.
+
 ![Run history](docs/images/run-history.png)
 
 ## Troubleshooting notes from the build
@@ -113,6 +133,7 @@ Real issues hit while building this, and how they were found:
 | False branch never ran its action | The action was lost when a publish failed on an expired portal session | Confirm the publish succeeded, and test every branch |
 | Rule B could raise repeat incidents for one event | 15 minute schedule with a 1 hour lookback re-matched the same rows | Added an `ingestion_time()` filter so each event is evaluated once |
 | Secret creation failed as subscription Owner | Key Vault RBAC model needs an explicit data plane role | Owner on the subscription is not Key Vault Secrets Officer |
+| Failure handler got 400 "Incident Arm id missing" | Dynamic content picker bound Incident ARM ID to a skipped branch action's output instead of the trigger | Reference the trigger explicitly with `triggerBody()?['object']?['id']` in error paths |
 
 ## Repository layout
 
@@ -141,7 +162,7 @@ README.md
 
 ## Next up
 
-- [ ] Failure handling: scope plus run-after branch that comments when enrichment fails
+- [*] Failure handling: scope plus run-after branch that comments when enrichment fails
 - [ ] Skip private IP ranges before calling the API
 - [ ] Single severity update after the loop based on the highest score
 - [ ] Identity context from Microsoft Graph (group memberships, recent sign-ins)
