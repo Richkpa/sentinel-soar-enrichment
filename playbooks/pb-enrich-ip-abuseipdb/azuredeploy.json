@@ -1,9 +1,9 @@
 {
     "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-    "contentVersion": "1.0.0.0",
+    "contentVersion": "1.1.0.0",
     "metadata": {
         "title": "Enrich incident IPs with AbuseIPDB",
-        "description": "Triggered by a Microsoft Sentinel incident. Looks up every IP entity in AbuseIPDB, comments the result on the incident, tags it, and raises severity to High when the abuse confidence score is 50 or above.",
+        "description": "Triggered by a Microsoft Sentinel incident. Looks up every IP entity in AbuseIPDB, comments the result on the incident, tags it, and raises severity to High when the abuse confidence score is 50 or above. If enrichment fails for an IP, the playbook comments the failure with the HTTP status and tags the incident enrichment-failed.",
         "prerequisites": [
             "An AbuseIPDB API key stored as a Key Vault secret named abuseipdb-api-key",
             "A Key Vault using the Azure RBAC permission model"
@@ -136,7 +136,12 @@
                                     }
                                 },
                                 "method": "get",
-                                "path": "/secrets/@{encodeURIComponent('abuseipdb-api-key')}/value"
+                                "path": "/secrets/@{encodeURIComponent('abuseipdb-api-key')}/value",
+                                "retryPolicy": {
+                                    "type": "fixed",
+                                    "count": 2,
+                                    "interval": "PT10S"
+                                }
                             },
                             "runtimeConfiguration": {
                                 "secureData": {
@@ -156,66 +161,166 @@
                             },
                             "type": "Foreach",
                             "actions": {
-                                "HTTP": {
-                                    "type": "Http",
-                                    "inputs": {
-                                        "uri": "https://api.abuseipdb.com/api/v2/check?ipAddress=@{items('For_each')?['Address']}&maxAgeInDays=90",
-                                        "method": "GET",
-                                        "headers": {
-                                            "Key": "@{body('Get_secret')?['value']}",
-                                            "Accept": "application/json"
-                                        }
-                                    },
-                                    "runtimeConfiguration": {
-                                        "contentTransfer": {
-                                            "transferMode": "Chunked"
+                                "Scope": {
+                                    "type": "Scope",
+                                    "actions": {
+                                        "HTTP": {
+                                            "type": "Http",
+                                            "inputs": {
+                                                "uri": "https://api.abuseipdb.com/api/v2/check?ipAddress=@{items('For_each')?['Address']}&maxAgeInDays=90",
+                                                "method": "GET",
+                                                "headers": {
+                                                    "Key": "@{body('Get_secret')?['value']}",
+                                                    "Accept": "application/json"
+                                                },
+                                                "retryPolicy": {
+                                                    "type": "fixed",
+                                                    "count": 2,
+                                                    "interval": "PT10S"
+                                                }
+                                            },
+                                            "runtimeConfiguration": {
+                                                "contentTransfer": {
+                                                    "transferMode": "Chunked"
+                                                },
+                                                "secureData": {
+                                                    "properties": [
+                                                        "inputs",
+                                                        "outputs"
+                                                    ]
+                                                }
+                                            }
                                         },
-                                        "secureData": {
-                                            "properties": [
-                                                "inputs",
-                                                "outputs"
-                                            ]
-                                        }
-                                    }
-                                },
-                                "Parse_JSON": {
-                                    "runAfter": {
-                                        "HTTP": [
-                                            "Succeeded"
-                                        ]
-                                    },
-                                    "type": "ParseJson",
-                                    "inputs": {
-                                        "content": "@body('HTTP')",
-                                        "schema": {
-                                            "type": "object",
-                                            "properties": {
-                                                "data": {
+                                        "Parse_JSON": {
+                                            "runAfter": {
+                                                "HTTP": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ParseJson",
+                                            "inputs": {
+                                                "content": "@body('HTTP')",
+                                                "schema": {
                                                     "type": "object",
                                                     "properties": {
-                                                        "ipAddress": {
-                                                            "type": "string"
+                                                        "data": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "ipAddress": {
+                                                                    "type": "string"
+                                                                },
+                                                                "abuseConfidenceScore": {
+                                                                    "type": "integer"
+                                                                },
+                                                                "totalReports": {
+                                                                    "type": "integer"
+                                                                },
+                                                                "countryCode": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "isp": {
+                                                                    "type": [
+                                                                        "string",
+                                                                        "null"
+                                                                    ]
+                                                                },
+                                                                "isTor": {
+                                                                    "type": "boolean"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        },
+                                        "Comment_-_AbuseIPDB_Result": {
+                                            "runAfter": {
+                                                "Parse_JSON": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "ApiConnection",
+                                            "inputs": {
+                                                "host": {
+                                                    "connection": {
+                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                    }
+                                                },
+                                                "method": "post",
+                                                "body": {
+                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                    "message": "<p>@{concat('AbuseIPDB: ', items('For_each')?['Address'], ' scored ', body('Parse_JSON')?['data']?['abuseConfidenceScore'], '/100, ', body('Parse_JSON')?['data']?['totalReports'], ' reports, country ', body('Parse_JSON')?['data']?['countryCode'], ', ISP ', body('Parse_JSON')?['data']?['isp'], ', Tor ', body('Parse_JSON')?['data']?['isTor'])}</p>"
+                                                },
+                                                "path": "/Incidents/Comment"
+                                            }
+                                        },
+                                        "Condition": {
+                                            "runAfter": {
+                                                "Comment_-_AbuseIPDB_Result": [
+                                                    "Succeeded"
+                                                ]
+                                            },
+                                            "type": "If",
+                                            "expression": {
+                                                "and": [
+                                                    {
+                                                        "greaterOrEquals": [
+                                                            "@body('Parse_JSON')?['data']?['abuseConfidenceScore']",
+                                                            50
+                                                        ]
+                                                    }
+                                                ]
+                                            },
+                                            "actions": {
+                                                "Escalate_-_Malicious_IP": {
+                                                    "type": "ApiConnection",
+                                                    "inputs": {
+                                                        "host": {
+                                                            "connection": {
+                                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                            }
                                                         },
-                                                        "abuseConfidenceScore": {
-                                                            "type": "integer"
+                                                        "method": "put",
+                                                        "body": {
+                                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                            "tagsToAdd": {
+                                                                "TagsToAdd": [
+                                                                    {
+                                                                        "Tag": "malicious-ip"
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "severity": "High"
                                                         },
-                                                        "totalReports": {
-                                                            "type": "integer"
-                                                        },
-                                                        "countryCode": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "isp": {
-                                                            "type": [
-                                                                "string",
-                                                                "null"
-                                                            ]
-                                                        },
-                                                        "isTor": {
-                                                            "type": "boolean"
+                                                        "path": "/Incidents"
+                                                    }
+                                                }
+                                            },
+                                            "else": {
+                                                "actions": {
+                                                    "Tag_-_Clean_IP": {
+                                                        "type": "ApiConnection",
+                                                        "inputs": {
+                                                            "host": {
+                                                                "connection": {
+                                                                    "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                                                }
+                                                            },
+                                                            "method": "put",
+                                                            "body": {
+                                                                "incidentArmId": "@triggerBody()?['object']?['id']",
+                                                                "tagsToAdd": {
+                                                                    "TagsToAdd": [
+                                                                        {
+                                                                            "Tag": "ip-enriched-clean"
+                                                                        }
+                                                                    ]
+                                                                }
+                                                            },
+                                                            "path": "/Incidents"
                                                         }
                                                     }
                                                 }
@@ -223,10 +328,11 @@
                                         }
                                     }
                                 },
-                                "Add_comment_to_incident_(V3)": {
+                                "Comment_-_Enrichment_Failed": {
                                     "runAfter": {
-                                        "Parse_JSON": [
-                                            "Succeeded"
+                                        "Scope": [
+                                            "TimedOut",
+                                            "Failed"
                                         ]
                                     },
                                     "type": "ApiConnection",
@@ -239,78 +345,36 @@
                                         "method": "post",
                                         "body": {
                                             "incidentArmId": "@triggerBody()?['object']?['id']",
-                                            "message": "<p>@{concat('AbuseIPDB: ', items('For_each')?['Address'], ' scored ', body('Parse_JSON')?['data']?['abuseConfidenceScore'], '/100, ', body('Parse_JSON')?['data']?['totalReports'], ' reports, country ', body('Parse_JSON')?['data']?['countryCode'], ', ISP ', body('Parse_JSON')?['data']?['isp'], ', Tor ', body('Parse_JSON')?['data']?['isTor'])}</p>"
+                                            "message": "<p>@{concat('AbuseIPDB enrichment FAILED for ', items('For_each')?['Address'], '. HTTP status: ', coalesce(string(outputs('HTTP')?['statusCode']), 'none'), '. Check the playbook run history.')}</p>"
                                         },
                                         "path": "/Incidents/Comment"
                                     }
                                 },
-                                "Condition": {
+                                "Tag_-_Enrichment_Failed": {
                                     "runAfter": {
-                                        "Add_comment_to_incident_(V3)": [
+                                        "Comment_-_Enrichment_Failed": [
                                             "Succeeded"
                                         ]
                                     },
-                                    "type": "If",
-                                    "expression": {
-                                        "and": [
-                                            {
-                                                "greaterOrEquals": [
-                                                    "@body('Parse_JSON')?['data']?['abuseConfidenceScore']",
-                                                    50
+                                    "type": "ApiConnection",
+                                    "inputs": {
+                                        "host": {
+                                            "connection": {
+                                                "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+                                            }
+                                        },
+                                        "method": "put",
+                                        "body": {
+                                            "incidentArmId": "@triggerBody()?['object']?['id']",
+                                            "tagsToAdd": {
+                                                "TagsToAdd": [
+                                                    {
+                                                        "Tag": "enrichment-failed"
+                                                    }
                                                 ]
                                             }
-                                        ]
-                                    },
-                                    "actions": {
-                                        "Update_incident": {
-                                            "type": "ApiConnection",
-                                            "inputs": {
-                                                "host": {
-                                                    "connection": {
-                                                        "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                                    }
-                                                },
-                                                "method": "put",
-                                                "body": {
-                                                    "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                    "tagsToAdd": {
-                                                        "TagsToAdd": [
-                                                            {
-                                                                "Tag": "malicious-ip"
-                                                            }
-                                                        ]
-                                                    },
-                                                    "severity": "High"
-                                                },
-                                                "path": "/Incidents"
-                                            }
-                                        }
-                                    },
-                                    "else": {
-                                        "actions": {
-                                            "Update_incident_1": {
-                                                "type": "ApiConnection",
-                                                "inputs": {
-                                                    "host": {
-                                                        "connection": {
-                                                            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
-                                                        }
-                                                    },
-                                                    "method": "put",
-                                                    "body": {
-                                                        "incidentArmId": "@triggerBody()?['object']?['id']",
-                                                        "tagsToAdd": {
-                                                            "TagsToAdd": [
-                                                                {
-                                                                    "Tag": "ip-enriched-clean"
-                                                                }
-                                                            ]
-                                                        }
-                                                    },
-                                                    "path": "/Incidents"
-                                                }
-                                            }
-                                        }
+                                        },
+                                        "path": "/Incidents"
                                     }
                                 }
                             }
